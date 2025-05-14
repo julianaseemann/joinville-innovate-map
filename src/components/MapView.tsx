@@ -18,10 +18,21 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
+interface MarkerData {
+  marker: L.Marker;
+  root: ReturnType<typeof createRoot>;
+}
+
+interface MapActionsProps {
+  actors: Actor[];
+  activeFilters: FilterOption[];
+  onMarkerClick: (actor: Actor) => void;
+}
+
 // Component to handle map actions
-const MapActions = ({ actors, activeFilters, onMarkerClick }) => {
+const MapActions: React.FC<MapActionsProps> = ({ actors, activeFilters, onMarkerClick }) => {
   const map = useMap();
-  const markersRef = useRef({});
+  const markersRef = useRef<Record<string, MarkerData>>({});
   
   // Clean up function for markers
   const cleanupMarkers = () => {
