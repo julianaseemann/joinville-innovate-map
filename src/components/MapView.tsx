@@ -1,56 +1,108 @@
 
-import React, { useEffect, useRef, useState } from 'react';
-import mapboxgl from 'mapbox-gl';
-import 'mapbox-gl/dist/mapbox-gl.css';
+import React, { useEffect, useState, useRef } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
+import 'leaflet/dist/leaflet.css';
 import { Actor, ActorType, FilterOption } from '../types/types';
 import { fetchAllActors } from '../services/mapService';
 import { createRoot } from 'react-dom/client';
 import ActorMarker from './ActorMarker';
 import InfoPopup from './InfoPopup';
+import L from 'leaflet';
+
+// Fix Leaflet icon issue
+// This is needed because Leaflet's default icons reference files that we don't have
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+});
+
+// Component to handle map actions
+const MapActions = ({ actors, activeFilters, onMarkerClick }) => {
+  const map = useMap();
+  const markersRef = useRef({});
+  
+  // Clean up function for markers
+  const cleanupMarkers = () => {
+    Object.values(markersRef.current).forEach(markerData => {
+      markerData.marker.remove();
+      if (markerData.root) {
+        markerData.root.unmount();
+      }
+    });
+    markersRef.current = {};
+  };
+  
+  useEffect(() => {
+    // Get active filter types
+    const activeTypes = activeFilters
+      .filter(filter => filter.isActive)
+      .map(filter => filter.id);
+    
+    // Filter actors
+    const filteredActors = actors.filter(actor => 
+      activeTypes.includes(actor.type as ActorType)
+    );
+    
+    // Clean up old markers
+    cleanupMarkers();
+    
+    // Add new markers
+    filteredActors.forEach(actor => {
+      const customIcon = L.divIcon({
+        className: 'custom-marker-icon',
+        html: '',
+        iconSize: [30, 30],
+      });
+      
+      // Create marker
+      const markerElement = document.createElement('div');
+      const marker = L.marker([actor.coordinates[1], actor.coordinates[0]], {
+        icon: customIcon
+      }).addTo(map);
+      
+      // Add custom React component to marker
+      const root = createRoot(markerElement);
+      root.render(
+        <ActorMarker 
+          actor={actor} 
+          onClick={() => onMarkerClick(actor)}
+        />
+      );
+      
+      // Attach the marker element to the Leaflet marker
+      marker.getElement().appendChild(markerElement);
+      
+      // Store for cleanup
+      markersRef.current[actor.id] = { marker, root };
+    });
+    
+    // Center map if we have actors
+    if (filteredActors.length > 0) {
+      const bounds = L.latLngBounds(filteredActors.map(actor => [actor.coordinates[1], actor.coordinates[0]]));
+      map.fitBounds(bounds, { padding: [50, 50] });
+    }
+    
+    return () => {
+      cleanupMarkers();
+    };
+  }, [map, actors, activeFilters, onMarkerClick]);
+  
+  return null;
+};
 
 interface MapViewProps {
   activeFilters: FilterOption[];
 }
 
 const MapView: React.FC<MapViewProps> = ({ activeFilters }) => {
-  const mapContainer = useRef<HTMLDivElement>(null);
-  const map = useRef<mapboxgl.Map | null>(null);
-  const markersRef = useRef<{ [key: string]: mapboxgl.Marker }>({});
-  const popupRef = useRef<mapboxgl.Popup | null>(null);
-  
   const [actors, setActors] = useState<Actor[]>([]);
-  const [mapLoaded, setMapLoaded] = useState(false);
-
-  // Initialize map on component mount
-  useEffect(() => {
-    if (mapContainer.current && !map.current) {
-      // NOTE: In a production app, you would get this from environment variables or user input
-      mapboxgl.accessToken = 'pk.eyJ1IjoibG92YWJsZSIsImEiOiJjbGdlNmppY3QwMXB2M2VvYTVqaDJlOTFvIn0.Yu2Xi3HRD_Ty7bHL9b7REw';
-      
-      map.current = new mapboxgl.Map({
-        container: mapContainer.current,
-        style: 'mapbox://styles/mapbox/light-v11',
-        center: [-48.8457, -26.3037], // Center of Joinville
-        zoom: 12,
-        pitch: 40, // Tilted view
-      });
-
-      map.current.addControl(new mapboxgl.NavigationControl(), 'top-right');
-      map.current.addControl(new mapboxgl.FullscreenControl(), 'top-right');
-
-      map.current.on('load', () => {
-        setMapLoaded(true);
-      });
-    }
-
-    return () => {
-      if (map.current) {
-        map.current.remove();
-        map.current = null;
-      }
-    };
-  }, []);
-
+  const [selectedActor, setSelectedActor] = useState<Actor | null>(null);
+  
+  // Center of Joinville
+  const initialPosition: [number, number] = [-26.3037, -48.8457]; // [latitude, longitude]
+  
   // Fetch actors data
   useEffect(() => {
     const getActors = async () => {
@@ -64,92 +116,42 @@ const MapView: React.FC<MapViewProps> = ({ activeFilters }) => {
 
     getActors();
   }, []);
-
-  // Filter and update markers when filters or actors change
-  useEffect(() => {
-    if (!mapLoaded || !map.current) return;
-    
-    // Clear existing markers
-    Object.values(markersRef.current).forEach(marker => marker.remove());
-    markersRef.current = {};
-    
-    // Get active filter types
-    const activeTypes = activeFilters
-      .filter(filter => filter.isActive)
-      .map(filter => filter.id);
-    
-    // Filter actors
-    const filteredActors = actors.filter(actor => 
-      activeTypes.includes(actor.type as ActorType)
-    );
-    
-    // Add markers for filtered actors
-    filteredActors.forEach(actor => {
-      const markerElement = document.createElement('div');
-      const root = createRoot(markerElement);
-      
-      root.render(
-        <ActorMarker 
-          actor={actor} 
-          onClick={(clickedActor) => handleMarkerClick(clickedActor)}
-        />
-      );
-      
-      const marker = new mapboxgl.Marker(markerElement)
-        .setLngLat(actor.coordinates)
-        .addTo(map.current!);
-      
-      markersRef.current[actor.id] = marker;
-    });
-  }, [mapLoaded, activeFilters, actors]);
-
-  // Handle marker click
+  
   const handleMarkerClick = (actor: Actor) => {
-    if (!map.current) return;
-    
-    // Close existing popup if open
-    if (popupRef.current) {
-      popupRef.current.remove();
-    }
-    
-    // Create popup element
-    const popupElement = document.createElement('div');
-    const root = createRoot(popupElement);
-    
-    root.render(
-      <InfoPopup 
-        actor={actor} 
-        onClose={() => {
-          if (popupRef.current) {
-            popupRef.current.remove();
-            popupRef.current = null;
-          }
-        }}
-      />
-    );
-    
-    // Create and show popup
-    popupRef.current = new mapboxgl.Popup({
-      closeButton: false,
-      maxWidth: '320px',
-      offset: 25
-    })
-      .setLngLat(actor.coordinates)
-      .setDOMContent(popupElement)
-      .addTo(map.current);
-    
-    // Fly to the clicked marker
-    map.current.flyTo({
-      center: actor.coordinates,
-      zoom: 14,
-      speed: 1.2,
-      essential: true
-    });
+    setSelectedActor(actor);
   };
 
   return (
     <div className="w-full h-full rounded-lg overflow-hidden shadow-lg relative">
-      <div ref={mapContainer} className="map-container" />
+      <MapContainer 
+        center={initialPosition} 
+        zoom={12} 
+        style={{ height: '100%', width: '100%' }} 
+        zoomControl={false}
+      >
+        <TileLayer
+          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+        />
+        <MapActions 
+          actors={actors} 
+          activeFilters={activeFilters} 
+          onMarkerClick={handleMarkerClick}
+        />
+        {selectedActor && (
+          <Popup
+            position={[selectedActor.coordinates[1], selectedActor.coordinates[0]]}
+            onClose={() => setSelectedActor(null)}
+            closeButton={false}
+            className="custom-popup"
+          >
+            <InfoPopup 
+              actor={selectedActor} 
+              onClose={() => setSelectedActor(null)} 
+            />
+          </Popup>
+        )}
+      </MapContainer>
     </div>
   );
 };

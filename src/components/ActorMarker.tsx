@@ -16,6 +16,7 @@ const ActorMarker: React.FC<ActorMarkerProps> = ({ actor, onClick }) => {
   
   const handleClick = (e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     onClick(actor);
   };
   
@@ -28,13 +29,18 @@ const ActorMarker: React.FC<ActorMarkerProps> = ({ actor, onClick }) => {
         height: isHovered ? '40px' : '30px',
         display: 'flex',
         justifyContent: 'center',
-        alignItems: 'center'
+        alignItems: 'center',
+        position: 'relative',
+        left: '-15px',
+        top: '-15px',
+        cursor: 'pointer',
+        zIndex: isHovered ? 1000 : 999
       }}
       onClick={handleClick}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
     >
-      <span style={{ fontSize: isHovered ? '18px' : '16px' }}>
+      <span style={{ fontSize: isHovered ? '18px' : '16px', color: 'white' }}>
         {icon}
       </span>
       {isHovered && (
